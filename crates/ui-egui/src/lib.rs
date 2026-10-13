@@ -2294,6 +2294,19 @@ impl PdfCraftApp {
         self.views.iter().any(|v| v.render_pending())
     }
 
+    /// `true` while the background worker still prepares a document that was opened, recovered
+    /// or unlocked (tests wait on it, as the desktop app's frames do).
+    pub fn opens_pending(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            !self.pending_opens.is_empty()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            false
+        }
+    }
+
     /// Apply a named view option (`--page 3`, `--panel bookmarks`, `--theme dark`, …).
     ///
     /// This is the seed of the UI control channel (M3.9): the same verbs become `ui.set` calls.

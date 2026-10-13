@@ -1,6 +1,8 @@
 //! Autosave and crash recovery: a session is "crashed" by dropping the app without a clean
 //! quit, and a new session must offer, recover or discard what was autosaved.
 
+use std::time::Duration;
+
 use egui::accesskit::Role;
 use egui::{Key, Modifiers};
 use egui_kittest::Harness;
@@ -60,6 +62,20 @@ fn crashed_session(s: &RecoveryStore, bytes: Vec<u8>, password: Option<&str>, pa
     // Dropped without a clean quit: the recovery entry stays.
 }
 
+/// Run frames until the background open worker has delivered every document (recovering and
+/// unlocking go through it, as in the desktop app), then a couple more so its effects show.
+fn settle(h: &mut Harness<'static, PdfCraftApp>) {
+    for _ in 0..500 {
+        h.run_steps(1);
+        if !h.state().opens_pending() {
+            h.run_steps(2);
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("the open worker did not finish in time");
+}
+
 fn harness(s: RecoveryStore) -> Harness<'static, PdfCraftApp> {
     let mut h = Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_eframe(move |_cc| {
         let mut app = PdfCraftApp::new();
@@ -80,7 +96,7 @@ fn a_crashed_session_is_offered_and_recovered_unsaved() {
     h.get_by_label("Recover unsaved documents?");
     h.get_by_label("work.pdf");
     h.get_by_label("Recover").click();
-    h.run_steps(4);
+    settle(&mut h);
     let app = h.state();
     assert_eq!(app.views.len(), 1);
     let doc = app.session.get(app.views[0].id).unwrap();
@@ -180,13 +196,13 @@ fn encrypted_documents_are_autosaved_encrypted_and_recovered_with_the_password()
     let mut h = harness(s.clone());
     h.get_by_label_contains("password-protected");
     h.get_by_label("Recover").click();
-    h.run_steps(3);
+    settle(&mut h);
     let field = h.get_by_role(Role::PasswordInput);
     field.focus();
     field.type_text("pw");
     h.run_steps(2);
     h.key_press(Key::Enter);
-    h.run_steps(4);
+    settle(&mut h);
     let app = h.state();
     assert_eq!(app.views.len(), 1);
     let d = app.session.get(app.views[0].id).unwrap();
@@ -205,7 +221,7 @@ fn a_cancelled_recovery_password_does_not_attach_to_the_next_unlocked_document()
     assert_eq!(s.list().len(), 1);
     let mut h = harness(s.clone());
     h.get_by_label("Recover").click();
-    h.run_steps(3);
+    settle(&mut h);
     assert!(h.state().password_prompt.is_some(), "the snapshot asks for its password");
     h.get_by_label("Cancel").click();
     h.run_steps(3);
@@ -215,7 +231,7 @@ fn a_cancelled_recovery_password_does_not_attach_to_the_next_unlocked_document()
     let app = h.state_mut();
     app.open_bytes("B.pdf", Some("/docs/B.pdf".into()), encrypted(fixture(1), "pw-b")).unwrap();
     app.submit_password(Some("pw-b".into()));
-    h.run_steps(3);
+    settle(&mut h);
     let app = h.state();
     assert_eq!(app.views.len(), 1);
     let b = app.session.get(app.views[0].id).unwrap();
@@ -291,7 +307,7 @@ fn missing_corrupt_or_mismatched_metadata_recovers_the_snapshot_without_an_origi
         }
         let mut h = harness(s.clone());
         h.get_by_label("Recover").click();
-        h.run_steps(4);
+        settle(&mut h);
         let app = h.state();
         assert_eq!(app.views.len(), 1, "{case}");
         let doc = app.session.get(app.views[0].id).unwrap();
@@ -316,14 +332,14 @@ fn an_encrypted_snapshot_without_metadata_still_requires_its_password() {
     std::fs::remove_file(s.dir().join(format!("{}.json", meta.key))).unwrap();
     let mut h = harness(s.clone());
     h.get_by_label("Recover").click();
-    h.run_steps(3);
+    settle(&mut h);
     assert!(h.state().views.is_empty());
     let field = h.get_by_role(Role::PasswordInput);
     field.focus();
     field.type_text("pw");
     h.run_steps(2);
     h.key_press(Key::Enter);
-    h.run_steps(4);
+    settle(&mut h);
     let app = h.state();
     assert_eq!(app.views.len(), 1);
     let doc = app.session.get(app.views[0].id).unwrap();
