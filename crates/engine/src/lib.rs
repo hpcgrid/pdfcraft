@@ -314,8 +314,8 @@ pub struct Document {
     pub dirty: bool,
     /// Bumped on every change to the working file (edit, undo, redo, save); autosave compares it.
     generation: u64,
-    /// The generation last handed out by `autosave_snapshots`.
-    snapshot_generation: u64,
+    /// The generation last handed out by `autosave_snapshots` and not reported as failed.
+    snapshot_generation: Option<u64>,
     /// Why the document cannot be edited (e.g. encryption), if so.
     pub read_only_reason: Option<String>,
     /// Interactive form fields of the current state (empty without a form).
@@ -939,6 +939,8 @@ fn outline_rows(items: &[pdfcraft_render::OutlineItem]) -> Vec<BookmarkRow> {
 #[derive(Clone, Debug)]
 pub struct RecoverySnapshot {
     pub doc: DocId,
+    /// The document's generation the bytes are of (for [`Session::autosave_failed`]).
+    pub generation: u64,
     pub name: String,
     pub path: Option<String>,
     pub bytes: Arc<Vec<u8>>,
@@ -3262,7 +3264,7 @@ impl Session {
             password: render_password,
             dirty: false,
             generation: 0,
-            snapshot_generation: 0,
+            snapshot_generation: None,
             read_only_reason,
             form: Arc::new(form),
             marks,
@@ -3835,7 +3837,7 @@ impl Session {
         // Caches keyed by the edit generation (edit lines, images, measurements) must see a new
         // one; there is nothing new to autosave.
         doc.generation = generation + 1;
-        doc.snapshot_generation = doc.generation;
+        doc.snapshot_generation = Some(doc.generation);
         // `open` pushed the new version last, so the old one is still at `old`.
         *self.docs.get_mut(old).ok_or_else(|| OpenError::Invalid("the document is not open".into()))? = doc;
         Ok(())
@@ -4264,10 +4266,11 @@ impl Session {
     pub fn autosave_snapshots(&mut self) -> Vec<RecoverySnapshot> {
         let mut out = Vec::new();
         for d in &mut self.docs {
-            if d.dirty && d.generation != d.snapshot_generation {
-                d.snapshot_generation = d.generation;
+            if d.dirty && d.snapshot_generation != Some(d.generation) {
+                d.snapshot_generation = Some(d.generation);
                 out.push(RecoverySnapshot {
                     doc: d.id,
+                    generation: d.generation,
                     name: d.name.clone(),
                     path: d.path.clone(),
                     bytes: d.bytes.clone(),
@@ -4278,6 +4281,16 @@ impl Session {
         out
     }
 
+    /// A snapshot from [`autosave_snapshots`](Self::autosave_snapshots) could not be stored:
+    /// the next call hands that generation out again. A newer generation is unaffected.
+    pub fn autosave_failed(&mut self, doc: DocId, generation: u64) {
+        if let Some(d) = self.docs.iter_mut().find(|d| d.id == doc)
+            && d.snapshot_generation == Some(generation)
+        {
+            d.snapshot_generation = None;
+        }
+    }
+
     /// Mark a document opened from a recovery file: it has unsaved changes and belongs at
     /// `path` (where Save writes), as when the session ended.
     pub fn mark_recovered(&mut self, id: DocId, path: Option<String>) {
@@ -4285,7 +4298,7 @@ impl Session {
             d.path = path;
             d.dirty = true;
             d.generation += 1;
-            d.snapshot_generation = d.generation; // its bytes are already in the recovery store
+            d.snapshot_generation = Some(d.generation); // its bytes are already in the recovery store
         }
     }
 

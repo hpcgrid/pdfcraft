@@ -127,6 +127,24 @@ fn saving_or_closing_clears_the_entry_and_nothing_is_written_for_clean_documents
 }
 
 #[test]
+fn an_autosave_that_fails_is_retried_without_another_edit() {
+    // The recovery folder can't be created (a file is in its place), then becomes usable (#1803).
+    let s = store("retry");
+    std::fs::write(s.dir(), b"in the way").unwrap();
+    let mut app = PdfCraftApp::new();
+    app.set_option("language", "en").unwrap();
+    app.enable_recovery(s.clone());
+    app.open_bytes("a.pdf", None, fixture(2)).unwrap();
+    app.apply_edit(Edit::RotatePages { pages: vec![0], degrees: 90 });
+    app.autosave_now();
+    assert!(s.list().is_empty(), "nothing could be written");
+    std::fs::remove_file(s.dir()).unwrap();
+    app.autosave_now();
+    assert_eq!(s.list().len(), 1, "the unsaved changes are autosaved once storage works");
+    s.clear();
+}
+
+#[test]
 fn quitting_cleanly_leaves_nothing_behind() {
     let s = store("quit");
     let mut h = Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_eframe({

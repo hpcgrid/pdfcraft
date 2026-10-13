@@ -172,6 +172,8 @@ impl PdfCraftApp {
             let meta = RecoveryMeta { key, name: snap.name, path: snap.path, saved_at: now_secs(), encrypted: snap.encrypted };
             if let Err(e) = store.write(&meta, &snap.bytes) {
                 log::warn!("autosave failed: {e}");
+                // Not stored: try the same changes again on the next autosave.
+                self.session.autosave_failed(snap.doc, snap.generation);
             }
         }
     }

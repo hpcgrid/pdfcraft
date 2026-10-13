@@ -1134,6 +1134,28 @@ fn autosave_snapshots_a_new_unsaved_document_once() {
 }
 
 #[test]
+fn a_snapshot_that_could_not_be_stored_is_handed_out_again() {
+    // Storage failed once and then recovered, with no edit in between (#1803).
+    let (mut s, id) = session_with(2);
+    s.apply(id, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    let failed = s.autosave_snapshots().remove(0);
+    s.autosave_failed(failed.doc, failed.generation);
+    let again = s.autosave_snapshots();
+    assert_eq!(again.len(), 1, "the same changes are retried");
+    assert_eq!((again[0].generation, &again[0].bytes), (failed.generation, &failed.bytes));
+    assert!(s.autosave_snapshots().is_empty(), "stored: nothing new since");
+    // An older snapshot failing doesn't hold back a newer one already handed out.
+    s.apply(id, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    let newer = s.autosave_snapshots().remove(0);
+    s.autosave_failed(id, failed.generation);
+    assert!(s.autosave_snapshots().is_empty(), "the newer snapshot stands");
+    // Nor does a failure reported after a newer edit: that edit is snapshotted anyway.
+    s.apply(id, Edit::RotatePages { pages: vec![0], degrees: 90 }).unwrap();
+    s.autosave_failed(id, newer.generation);
+    assert_eq!(s.autosave_snapshots().len(), 1);
+}
+
+#[test]
 fn recovered_documents_reopen_unsaved_at_their_original_path() {
     let (mut s, id) = session_with(2);
     s.apply(id, Edit::DeletePages { pages: vec![1] }).unwrap();
