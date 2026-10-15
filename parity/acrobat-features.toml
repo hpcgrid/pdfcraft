@@ -1118,8 +1118,8 @@ milestone = "M12"
 status = "partial"
 commands = ["view.full_screen"]
 tools = []
-evidence = ["crates/ui-egui/tests/view.rs::full_screen_shows_one_fitted_page_and_clicks_turn_it"]
-notes = "Click to advance (and shift-click back) ships with view.full-screen; auto-advance every N seconds, loop after the last page, page transitions and the full-screen preferences are not done"
+evidence = ["crates/ui-egui/tests/view.rs::full_screen_shows_one_fitted_page_and_clicks_turn_it", "crates/ui-egui/tests/view.rs::full_screen_plays_a_page_transition_and_honours_the_display_time", "crates/ui-egui/tests/view.rs::full_screen_turns_at_once_without_animations_or_in_spreads", "crates/ui-egui/tests/view.rs::full_screen_hides_a_still_pointer"]
+notes = "Click to advance (and shift-click back) ships with view.full-screen. With Acrobat's default Full Screen preferences: a page's /Trans plays when it comes into view (single-page view, no view rotation; the outgoing page is held until the incoming one has rendered; the Animation effects preference turns them off), a page's /Dur advances to the next page once it is up (not past the last), and the pointer hides after three still seconds. Not done: the Full Screen preferences themselves (advance every N seconds, loop after the last page, a default transition, ignoring the document's transitions, the pointer setting), and transitions between two-page spreads"
 
 [[feature]]
 id = "view.reflow"

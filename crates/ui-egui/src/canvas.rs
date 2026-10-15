@@ -15,6 +15,8 @@ use pdfcraft_render::{DestView, DocInfo, LayerOp, LinkTarget, PRINT_TAG, PageTex
 use crate::theme::{self, Tokens};
 use crate::{PdfCraftApp, QuickTool, RightPanel, comments, icons, widgets};
 
+mod presenter;
+
 /// Logical pixels per PDF point at 100% (96 dpi, like browsers).
 pub const PT: f32 = 96.0 / 72.0;
 const GAP: f32 = 14.0;
@@ -352,6 +354,8 @@ pub struct DocView {
     /// Full screen (Acrobat's Full Screen Mode): the display saved on entering it, while the view
     /// shows one page or spread at a time, fitted to the screen. `None` outside full screen.
     presentation: Option<SavedDisplay>,
+    /// Full screen's transitions, display times and pointer (see [`presenter`]).
+    pub(crate) presenter: presenter::Presenter,
     pages: HashMap<usize, PageTex>,
     /// Pages the renderer could not draw, with the reason (never re-requested).
     errors: HashMap<usize, String>,
@@ -639,6 +643,7 @@ impl DocView {
             flash: None,
             compare_marks: Vec::new(),
             presentation: None,
+            presenter: Default::default(),
             pages: HashMap::new(),
             errors: HashMap::new(),
             waiting_since: HashMap::new(),
@@ -1261,12 +1266,14 @@ impl DocView {
         self.continuous = false;
         self.fit = Fit::Page;
         self.selection = None;
+        self.presenter = Default::default();
         self.goto = Some((self.current, 0.0));
     }
 
     /// Leave full screen: the display from before it comes back, at the page reached meanwhile.
     pub fn leave_presentation(&mut self) {
         let Some(saved) = self.presentation.take() else { return };
+        self.presenter = Default::default();
         self.layout = saved.layout;
         self.continuous = saved.continuous;
         self.cover = saved.cover;
@@ -1278,6 +1285,12 @@ impl DocView {
     /// Whether the view is in full screen's one-page-at-a-time display.
     pub fn presenting(&self) -> bool {
         self.presentation.is_some()
+    }
+
+    /// Whether full screen is playing a page transition (or holding the page before it until the
+    /// next one has rendered).
+    pub fn presenting_a_transition(&self) -> bool {
+        self.presenter.turning()
     }
 
     /// Switch the base page display (Single or Two-page), leaving continuous scrolling as it is.
@@ -3243,6 +3256,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
                     view.flash = None;
                 }
             }
+        }
+        // Full screen plays transitions over the page just drawn, and keeps time (#379).
+        if view.presentation.is_some() {
+            presenter::frame(view, info, painter, ui.ctx(), now, animates, pointer);
         }
         // ScrollArea ignores the wheel while any widget is dragged, so a text-selection drag
         // scrolls the page itself (#721). After the page loop, so it keeps scrolling once the
